@@ -15,59 +15,243 @@ For more information on OpenShift please visit:
 - [OpenShift Origin documentation](https://docs.openshift.org/latest/welcome/index.html)
 - [How to setup an OpenShift cluster](https://docs.openshift.org/latest/install_config/install/planning.html)
 
-## Installation
-### Template File
-The template file (template.json) is an OpenShift descriptive file that is used to implement an environment and its parameterized objects.A template can be processed and the included objects will be created in the project namespace.
-The openEO Openshift template file uses references to the public git repository to build and deploy the required services (/services).
-For further information please visit: [OpenShift Templates](https://docs.openshift.org/latest/dev_guide/templates.html)
+# Installation
+## Local openShift cluster
 
-### Requirements
-- For the installation and running of the openEO instance a OpenShift cluster with accessible OpenShift API must be setup. (See: [Installing a cluster](https://docs.openshift.com/container-platform/3.7/install_config/install/planning.html)
-- The OpenShift cluster needs to have persitant volumes avaiable and a storage class to access the storage (See: [Configure Persistant Storage](https://docs.openshift.com/container-platform/3.7/install_config/persistent_storage/index.html)
-- The OpenShift Client Tools must be installed (See: [OpenShift client tools download](https://www.openshift.org/download.html))
+For testing purposes, it may be convenient to install a local openShift cluster (which fully runs on a single machine) and deploy a (number of) project(s) on it.
+The following documentation explains how to install oc client tools, oc-cluster wrapper and configure a mock-up of the EODC openEO back-end on a laptop. Insructions here are taken partly from this link (https://opensource.com/article/18/11/local-okd-cluster-linux), but they are tailored to Ubuntu 18.04 and to our openEO deployment, including creating persistent volumes and persistent volume claims.
 
-### Installation Steps
-- Log into OpenShift instance usuing OpenShift Client Tools (oc): ```oc login <openshift_api_url>```
-- Create new project for openEO: ```oc new-project <openeo_project_name>```
-- Create new project for job execution: ```oc new-project <execution_project_name>```
-- Create a service account: ```oc create serviceaccount robot```
-- Grant admin role to service account: ```oc policy add-role-to-user admin system:serviceaccounts:test:robot```
-- Fill out parameters in OpenShift template file (template.json)
-- Change to the created OpenShift openEO project: ```oc project <openeo_project_name>```
-- Download the template.json from the git repository
-- Process the template and create objects: ```oc process template.json | oc create -f -```
-- The project will now be setup in the openeo namespace and can be accesses over the host name that was specified in the template file
+These are the different steps:
 
-### Parameters
-- EXECUTION_NAMESPACE:
-  Namspace of OpenSHift project for job execution (e.g. "execution-environment")
-- SERVICEACCOUNT_TOKEN:
-  Permanent token of a service account in the execution namespace that can bus used to access the OpenShift API
-- STORAGE_CLASS:
-  Storage class for PersitantVolumeClaims that should be used (e.g. "storage-write")
-- OPENEO_API
-  URI for accessing the openEO API (e.g. http://openeo.example.com)
-- OPENSHIFT_API
-  URI for accessing the OpenShift API (e.g. http://openshift.example.com)
-- CSW_SERVER
-  URI for accessing CSW server (e.g. http://csw.example.com)
+- **oc client tools**
+- **oc-cluster wrapper**
+- **openEO services**
+- **openEO execution environment**
 
-## Contributing
-### Developing Locally
-MiniShift is a tool for local development by launching a single node OpenShift cluster. It can be downloaded at [MiniShift](https://www.openshift.org/minishift/)
-Furthermore, for developing locally on an external cluster the port of the pods in the project namespace can be forwarded to a local machine:
-- Login into the OpenShift instance: ```oc login <openshift_api_url>```
-- Switch to openEO project: ```oc project <openeo_project_name>```
-- Get names of pods in project: ```oc get pods```
-- Forward ports of pods that are needed for developing (e.g. database/service): ```oc port-forward <pod> [<local_port>:]<pod_port> [[<local_port>:]<pod_port> ...]```
-- E.g. ```oc port-forward -p openeo-user-postgres-1-s2da 5432:5432```
+**oc client tools**
 
-### Further Commands:
-- Delete all objects in namespace (except secrets and pvcs): ```oc delete all --all```
-- Run service test: ```python manage.py test```
-- Run service locally: ```python manage.py runserver```
-- Recreate service database: ```python manage.py recreate_db```
-- Seed service database: ```python manage.py seed_db```
-- Drop service database: ```python manage.py drop_db```
-- Migrate service database: ```python manage.py db migrate```
-- Upgrade service database: ```python manage.py db upgrade```
+With the latest oc client tools version (v3.11) there are connectivity issues from the pods within the cluster when trying to pull images online (or in general to access internet). Until this is solved, we use v3.9:
+
+```
+cd ~/Downloads
+wget https://github.com/openshift/origin/releases/download/v3.9.0/openshift-origin-client-tools-v3.9.0-191fece-linux-64bit.tar.gz
+tar -xzvf openshift-origin-client-tools-v3.9.0-191fece-linux-64bit.tar.gz
+```
+Optionally, place the executable in your $PATH, e.g.:
+
+`sudo cp openshift-origin-client-tools-v3.9.0-191fece-linux-64bit/oc /usr/local/bin/`
+
+Check that it works:
+```
+$ oc version
+oc v3.9.0+191fece
+kubernetes v1.9.1+a0ce1bc657
+features: Basic-Auth GSSAPI Kerberos SPNEGO
+```
+
+At this point you can fire up a local cluster simply by running:
+
+`oc cluster up`
+
+However, the cluster will not be persistent, hence the need of oc-cluster wrapper.
+
+
+**oc-cluster wrapper**
+
+oc-cluster wrapper provides, amongst other things, cluster persistency and cluster profiles, i.e. the ability to set up a number of different clusters, each of which can contain a number of projects. Note that you can only run one cluster profile at any given time. For our purposes, it is mostly the convenience of having a persistent cluster that we want to achieve. Have a quick look on their github page (https://github.com/openshift-evangelists/oc-cluster-wrapper), particularly under 'Cluster profiles'.
+
+Clone the repository
+
+```
+git clone https://github.com/openshift-evangelists/oc-cluster-wrapper
+echo 'PATH=$HOME/oc-cluster-wrapper:$PATH' >> $HOME/.bash_profile
+echo 'export PATH' >> $HOME/.bash_profile
+```
+
+Generally, you can now use oc-cluster instead of oc cluster. Use the first when creating a cluster to use the wrapper we just installed.
+
+Create and start a local cluster on your localhost
+
+`oc-cluster up myclustername --routingsuffix 127.0.0.1.nip.io`
+
+The nip.io suffix is needed for the EODC openEO instance, not for openShift itself. Do not use xip.io instead of nip.io, as xip.io will not work on localhost.
+
+You will find a folder named myclustername under the profiles of oc-cluster wrapper, here:
+
+`ls $HOME/.oc/profiles/`
+
+By default on the cluster you have a normal user (developer/developer) and an admin user (admin/admin). To check that your cluster is running, simply open the browser on https://127.0.0.1/8443, or type:
+
+`oc-cluster status`
+
+You can stop a cluster with:
+
+`oc-cluster down`
+
+You can list all the clusters you have created with:
+
+`oc-cluster list`
+
+You can delete a cluster with:
+
+`oc-cluster destroy`
+
+To test that the basic installation works, create this sample app:
+
+```
+oc new-app php:5.6~https://github.com/rgerardi/ocp-smoke-test.git
+oc expose svc ocp-smoke-test
+```
+
+You might have to login to do that (oc login -> developer/developer). If the app is installed and the route works (i.e. you can click on it), you are good to go.
+
+
+**openEO services**
+
+  We are going to install, in this order, the following processes: rabbitmq, gateway, data, processes (includes process_graphs), jobs. Each of these has a yaml template, stored in the templates folder in this repository. These templates pull code from the master branch on this github repository.
+
+  Create a new project from the web console with the name you prefer. Make sure you are in the scope of that project from the command line: `oc project myprojectname`
+
+  You can see all the projects with: `oc projects`
+
+
+  - rabbitmq
+
+      `oc process -f rabbitmq.eodc.yaml | oc create -f -`
+
+      You will see a rabbitmq app/service on your web console inside myprojectname.
+
+  - gateway
+
+      `oc process -f gateway_local.eodc.yaml | oc create -f -`
+
+      The differences between the local and 'original' gateway are the fields 'GATEWAY URL' and 'CLIENT JSON'. Once the service is up, you should be able to display the capabilities of openEO at the url http://openeo.local.127.0.0.1.nip.io
+
+
+  - data
+
+      `oc process -f data.eodc.yaml | oc create -f -`
+
+      Once this is up, try listing the available datasets/collections at http://openeo.local.127.0.0.1.nip.io/collections
+
+  - processes (and process_graphs)
+
+      This service includes a psql pod. In order to avoid data loss, it mounts a persistent volume claim (pvc), which depends on a persistent volume (pv). For openShift, a pv is a resource (like CPU and memory), and hence must be created in advance (with admin rights), while a pvc is an allocation of (volume) resources and can be done by a user when creating a service. The pvc is specified in the processes template, but we need to create the pv first. Inside the 'persistent_volume_processes.yaml' file, modify 'the-cluster-name' with the name of the cluster you created, then run:
+
+      `oc create -f persistent_volume_processes.yaml`
+
+      The mount folder specified in the yaml file must have full right for user and group, run the following to achieve this:
+
+      `sudo chmod 770 -R $HOME/.oc/profiles/the-cluster-name/pv`
+
+      where 'the-cluster-name' must be adapted to the name you used. You can see all pv on your cluster by running (with admin rights, i.e. oc login -> admin/admin): `oc get pv`
+
+      A number of pv are automatically created by openShift when generating the cluster, plus there should be one named 'vol-openeo-processes'.
+
+      Now you can create the processes service:
+
+      `oc process -f processes.eodc.yaml | oc create -f -`
+
+      You will see that the project now has a pvc with: `oc get pvc` and/or under the storage tab on the web console (no admin rights needed for this, but make sure you are in the right project.)
+
+  - jobs
+
+    As for the processes service, create the pv with the file 'persistent_volume_jobs.yaml' (modify the cluster name first), then create the service with:
+
+    `oc process -f jobs.eodc.yaml | oc create -f -`
+
+    Remember to also 'chmod' the mounted folder as in the processes step.
+
+  - initialize psql databases (processes and jobs services)
+
+    The databases are created empty (no tables, no data) and they must be initialized (only when creating the services the first time). For the processes service, from the web console, go to Applications/Pods/openeo-processes-1-xxxxx (not the db and not the build), then select Terminal. From the CLI, type:
+
+    `alembic upgrade head`
+
+    To double check that this worked, connect now to the openeo-processes-db-1-xxxxx pod, go to the terminal, and type:
+
+    `psql processes`
+
+    `\d`
+
+    You should see the schema of the different tables inside the processes database (perhaps unclearly, the processes database contains a processes table...)
+
+    Another way to connect to the pod is to start a terminal, get a list of the running pods (`oc get pods` , you must be in the right project), then remote-shell to the pod:
+
+    `oc rsh openeo-processes-1-xxxxx`
+
+    From here you can type commands above. Do the same for the jobs service.
+
+  - add processes to the processes databases
+
+    openEO processes currently must be added manually. You can use POSTMAN and submit a json file (raw/json), like on item in this list of processes (https://github.com/Open-EO/openeo-api/blob/0.3.1/processes.json). For example, to add the get_collection process, make sure your cluster is up and that the processes service is properly initialized (including the pv, pvc and database initialized), then from POSTMAN send a POST request to the proper endpoint (http://openeo.local.127.0.0.1.nip.io/processes), including the following under Body/raw (json):
+
+         {
+    "name": "get_collection",
+    "summary": "Selects a collection.",
+    "description": "Filters and selects a single collection provided by the back-end. The back-end provider decides which of the potential collections is the most relevant one to be selected.",
+    "min_parameters": 1,
+    "parameters": {
+      "name": {
+        "description": "Filter by collection name",
+        "schema": {
+          "type": "string",
+          "examples": [
+            "Sentinel2A-L1C"
+          ]
+        }
+      },
+      "spatial_extent": {
+        "description": "Filter by spatial extent.",
+        "schema": {
+          "type": "object",
+          "format": "spatial_extent"
+        }
+      },
+      "temporal_extent": {
+        "description": "Filter by time.",
+        "schema": {
+          "type": "array",
+          "format": "temporal_extent"
+        }
+      },
+      "bands": {
+        "description": "Filter by band id.",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "license": {
+        "description": "Filter by license.",
+        "schema": {
+          "type": "string",
+          "description": "SPDX License identifier, SPDX expression, or the string proprietary if the license is not on the SPDX license list.",
+          "examples": [
+            "Apache-2.0"
+          ]
+        }
+      },
+      "data_pid": {
+        "description": "Filter by persistent data identifier (PID).",
+        "schema": {
+          "type": "string",
+          "description": "The PID identifies a data set that was used before at the back end, it is already filtered by temporal and spatial extent.",
+          "examples": [
+            "qu-0d6bb7c1-bf6d-49ec-a21c-bd9afcc6fdda"
+          ]
+        }
+      }
+    },
+    "returns": {
+      "description": "Processed EO data.",
+      "schema": {
+        "type": "object",
+        "format": "eodata"
+      }
+    }
+}
+
+If it worked fine, send a GET request to the same url to display the process (or alternatively navigate to http://openeo.local.127.0.0.1.nip.io/processes with your browser).
