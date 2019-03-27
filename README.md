@@ -1,4 +1,4 @@
-Git Repository of the master thesis "Designing a Framework gaining Repeatability for the OpenEO platform" from Bernhard Gößwein
+Git Repository of the master thesis "Designing a Framework gaining Repeatability for the OpenEO platform" by Bernhard Gößwein
 
 It consists of the followign parts:
 
