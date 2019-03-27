@@ -184,7 +184,7 @@ You might have to login to do that (oc login -> developer/developer). If the app
 
   - add processes to the processes databases
 
-    openEO processes currently must be added manually. You can use POSTMAN and submit a json file (raw/json), like on item in this list of processes (https://github.com/Open-EO/openeo-api/blob/0.3.1/processes.json). For example, to add the NDVI process, make sure your cluster is up and that the processes service is properly initialized (including the pv, pvc and database initialized), then from POSTMAN send a POST request to the proper endpoint (http://openeo.local.127.0.0.1.nip.io/processes), including the following under Body/raw (json):
+    openEO processes currently must be added manually. You can use POSTMAN and submit a json file (raw/json), like on item in this list of processes (https://github.com/bgoesswein/dataid_openeo/blob/master/openeo-openshift-driver/processes.json). For example, to add the NDVI process, make sure your cluster is up and that the processes service is properly initialized (including the pv, pvc and database initialized), then from POSTMAN send a POST request to the proper endpoint (http://openeo.local.127.0.0.1.nip.io/processes), including the following under Body/raw (json):
 
         {
           "name": "NDVI",
@@ -232,3 +232,5 @@ You might have to login to do that (oc login -> developer/developer). If the app
         }
         
 If it worked fine, send a GET request to the same url to display the process (or alternatively navigate to http://openeo.local.127.0.0.1.nip.io/processes with your browser).
+
+After that all filter processes type need to be set to "filter" manually. Therefore connect to the POD of the processes-db via the web interface of Openshift, connect to the database with "psql processes" and update the "p_type" all records with "filter" in the beginning and "get_collection" to the value "filter".
