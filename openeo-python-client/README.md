@@ -12,11 +12,9 @@ Python client API for OpenEO. Allows you to interact with OpenEO backends from y
 Windows users: It is recommended to install Anaconda Python as shapely may need to be installed separately using the Anaconda Navigator.
 
 ## Usage
-[Basic concepts and examples](https://github.com/Open-EO/openeo-python-client/blob/master/examples)
+[Examples and all use cases in python code](https://github.com/bgoesswein/dataid_openeo/tree/master/openeo-python-client/examples)
 
-[General OpenEO background](https://open-eo.github.io/openeo-api/)
-
-[API docs](https://open-eo.github.io/openeo-python-client/)
+[General Unit tests](https://github.com/bgoesswein/dataid_openeo/tree/master/openeo-python-client/tests)
 
 ## Development
 
