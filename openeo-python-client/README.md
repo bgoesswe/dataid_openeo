@@ -1,4 +1,4 @@
-# openeo-python-client
+# openeo-python-client (modified version for the master thesis bgoesswein)
 
 Python client API for OpenEO. Allows you to interact with OpenEO backends from your own environment.
 
