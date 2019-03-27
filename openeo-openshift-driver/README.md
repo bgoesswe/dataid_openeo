@@ -184,74 +184,51 @@ You might have to login to do that (oc login -> developer/developer). If the app
 
   - add processes to the processes databases
 
-    openEO processes currently must be added manually. You can use POSTMAN and submit a json file (raw/json), like on item in this list of processes (https://github.com/Open-EO/openeo-api/blob/0.3.1/processes.json). For example, to add the get_collection process, make sure your cluster is up and that the processes service is properly initialized (including the pv, pvc and database initialized), then from POSTMAN send a POST request to the proper endpoint (http://openeo.local.127.0.0.1.nip.io/processes), including the following under Body/raw (json):
+    openEO processes currently must be added manually. You can use POSTMAN and submit a json file (raw/json), like on item in this list of processes (https://github.com/Open-EO/openeo-api/blob/0.3.1/processes.json). For example, to add the NDVI process, make sure your cluster is up and that the processes service is properly initialized (including the pv, pvc and database initialized), then from POSTMAN send a POST request to the proper endpoint (http://openeo.local.127.0.0.1.nip.io/processes), including the following under Body/raw (json):
 
-         {
-    "name": "get_collection",
-    "summary": "Selects a collection.",
-    "description": "Filters and selects a single collection provided by the back-end. The back-end provider decides which of the potential collections is the most relevant one to be selected.",
-    "min_parameters": 1,
-    "parameters": {
-      "name": {
-        "description": "Filter by collection name",
-        "schema": {
-          "type": "string",
-          "examples": [
-            "Sentinel2A-L1C"
-          ]
-        }
-      },
-      "spatial_extent": {
-        "description": "Filter by spatial extent.",
-        "schema": {
-          "type": "object",
-          "format": "spatial_extent"
-        }
-      },
-      "temporal_extent": {
-        "description": "Filter by time.",
-        "schema": {
-          "type": "array",
-          "format": "temporal_extent"
-        }
-      },
-      "bands": {
-        "description": "Filter by band id.",
-        "schema": {
-          "type": "array",
-          "items": {
-            "type": "string"
+        {
+          "name": "NDVI",
+          "summary": "Calculates the Normalized Difference Vegetation Index.",
+          "description": "Calculates the Normalized Difference Vegetation Index.",
+          "parameters": {
+            "imagery": {
+              "description": "EO data to process.",
+              "required": true,
+              "schema": {
+                "type": "object",
+                "format": "eodata"
+              }
+            },
+            "red": {
+              "description": "Band id of the red band.",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            "nir": {
+              "description": "Band id of the near-infrared band.",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "description": "Processed EO data.",
+            "schema": {
+              "type": "object",
+              "format": "eodata"
+            }
+          },
+          "exceptions": {
+            "RedBandInvalid": {
+              "description": "The specified red band is not available or contains invalid data."
+            },
+            "NirBandInvalid": {
+              "description": "The specified nir band is not available or contains invalid data."
+            }
           }
         }
-      },
-      "license": {
-        "description": "Filter by license.",
-        "schema": {
-          "type": "string",
-          "description": "SPDX License identifier, SPDX expression, or the string proprietary if the license is not on the SPDX license list.",
-          "examples": [
-            "Apache-2.0"
-          ]
-        }
-      },
-      "data_pid": {
-        "description": "Filter by persistent data identifier (PID).",
-        "schema": {
-          "type": "string",
-          "description": "The PID identifies a data set that was used before at the back end, it is already filtered by temporal and spatial extent.",
-          "examples": [
-            "qu-0d6bb7c1-bf6d-49ec-a21c-bd9afcc6fdda"
-          ]
-        }
-      }
-    },
-    "returns": {
-      "description": "Processed EO data.",
-      "schema": {
-        "type": "object",
-        "format": "eodata"
-      }
-    }
-}
-
+        
 If it worked fine, send a GET request to the same url to display the process (or alternatively navigate to http://openeo.local.127.0.0.1.nip.io/processes with your browser).
