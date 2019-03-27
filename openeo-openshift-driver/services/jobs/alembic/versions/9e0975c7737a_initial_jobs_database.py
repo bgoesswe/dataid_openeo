@@ -31,7 +31,29 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(),default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
     )
+    op.create_table(
+        'query',
+        sa.Column('query_pid', sa.String(), primary_key=True),
+        sa.Column('dataset_pid', sa.String(), nullable=True),
+        sa.Column('original', sa.String(), nullable=True),
+        sa.Column('normalized', sa.String(), nullable=False),
+        sa.Column('norm_hash', sa.JSON(), default={"format": "GTiff"}),
+        sa.Column('result_hash', sa.String(), default="free"),
+        sa.Column('meta_data', sa.Integer(), default=0),
+        sa.Column('created_at', sa.DateTime(), default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
+    )
+    op.create_table(
+        'queryjob',
+        sa.Column('id', sa.String(), primary_key=True),
+        sa.Column('query_pid', sa.String(), nullable=True),
+        sa.Column('job_id', sa.String(), nullable=True),
+        sa.Column('created_at', sa.DateTime(), default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
+    )
 
 
 def downgrade():
     op.drop_table('jobs')
+    op.drop_table('query')
+    op.drop_table('queryjob')
