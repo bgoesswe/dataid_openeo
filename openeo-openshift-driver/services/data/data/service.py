@@ -9,6 +9,8 @@ from .schemas import ProductRecordSchema, RecordSchema, FilePathSchema
 from .dependencies.csw import CSWSession, CWSError
 from .dependencies.arg_parser import ArgParserProvider, ValidationError
 
+import json
+import logging
 
 
 
@@ -59,6 +61,9 @@ class DataService:
 
     jobs_service = RpcProxy("jobs")
 
+    deleted = False
+    updatetime = None
+
     @rpc
     def get_all_products(self, user_id: str=None) -> Union[list, dict]:
         """Requests will ask the back-end for available data and will return an array of 
@@ -100,6 +105,7 @@ class DataService:
         # Query Store addition:
         user_id = "openeouser"
         querydata = self.jobs_service.get_querydata_by_pid(name)
+        orig_query = self.jobs_service.get_origquerydata_by_pid(name)
         dataset = self.jobs_service.get_dataset_by_pid(name)
         timestamp = self.jobs_service.get_querytimestamp_by_pid(name)
 
@@ -123,6 +129,7 @@ class DataService:
                 response["pid"] = "http://openeo.local.127.0.0.1.nip.io/collections/{}".format(pid)
                 response["result"] = "http://openeo.local.127.0.0.1.nip.io/collections/{}/result".format(pid)
                 response["execution-time"] = timestamp
+                response["original_query"] = orig_query
 
             return {
                 "status": "success",
@@ -175,16 +182,54 @@ class DataService:
                 response["result"] = "http://openeo.local.127.0.0.1.nip.io/collections/{}/result".format(pid)
                 response["execution-time"] = timestamp
 
-            # spatial_extent = [49.041469, 9.497681, 46.517296, 17.171631]
+            return {
+                "status": "success",
+                "code": 200,
+                "data": response
+            }
+        except ValidationError as exp:
+            return ServiceException(400, user_id, str(exp), internal=False,
+                                    links=["#tag/EO-Data-Discovery/paths/~1collections~1{name}/get"]).to_dict()
 
-            # temporal = "{}/{}".format('2017-01-01', '2017-01-31')
+    @rpc
+    def get_product_detail_filelist_updated(self, user_id: str = None, name: str = None) -> dict:
+        """The request will ask the back-end for further details about a dataset.
 
-            # product_record = self.get_records(
-            #    detail="full",
-            #    user_id=user_id,
-            #    name=name,
-            #    spatial_extent=spatial_extent,
-            #    temporal_extent=temporal)
+        Keyword Arguments:
+            user_id {str} -- The user id (default: {None})
+            name {str} -- The product identifier (default: {None})
+
+        Returns:
+            dict -- The product or a serialized exception
+        """
+        # Query Store addition:
+        user_id = "openeouser"
+        querydata = self.jobs_service.get_querydata_by_pid(name)
+        dataset = self.jobs_service.get_dataset_by_pid(name)
+        timestamp = self.jobs_service.get_querytimestamp_by_pid(name)
+
+        result_set = None
+
+        if querydata:
+            pid = name
+            result_set = self.jobs_service.reexecute_query(user_id, pid, deleted=True)
+            name = dataset
+
+        try:
+            name = self.arg_parser.parse_product(name)
+            product_record = self.csw_session.get_product(name)
+            response = ProductRecordSchema().dump(product_record).data
+
+            if result_set:
+                response["input_files"] = result_set
+            if querydata:
+                response["query"] = querydata
+                response.pop('spatial_extent', None)
+                response.pop('temporal_extent', None)
+                response.pop('bands', None)
+                response["pid"] = "http://openeo.local.127.0.0.1.nip.io/collections/{}".format(pid)
+                response["result"] = "http://openeo.local.127.0.0.1.nip.io/collections/{}/result".format(pid)
+                response["execution-time"] = timestamp
 
             return {
                 "status": "success",
@@ -194,12 +239,10 @@ class DataService:
         except ValidationError as exp:
             return ServiceException(400, user_id, str(exp), internal=False,
                                     links=["#tag/EO-Data-Discovery/paths/~1collections~1{name}/get"]).to_dict()
-        # except Exception as exp:
-        #    return ServiceException(500, user_id, str(exp)).to_dict()
 
     @rpc
     def get_records(self, user_id: str=None, name: str=None, detail: str="full", 
-                    spatial_extent: str=None, temporal_extent: str=None, timestamp=None) -> Union[list, dict]:
+                    spatial_extent: str=None, temporal_extent: str=None, timestamp=None, updated=None,deleted=False) -> Union[list, dict]:
         """The request will ask the back-end for further details about the records of a dataset.
         The records must be filtered by time and space. Different levels of detail can be returned.
 
@@ -238,7 +281,7 @@ class DataService:
                 response = RecordSchema(many=True).dump(records).data
             elif detail == "file_path":
                 file_paths = self.csw_session.get_file_paths(
-                    name, spatial_extent, start, end, timestamp)
+                    name, spatial_extent, start, end, timestamp, updated=updated, deleted=deleted)
                 response = FilePathSchema(many=True).dump(file_paths).data
 
             return {
@@ -254,7 +297,7 @@ class DataService:
 
     @rpc
     def get_query(self, user_id: str = None, name: str = None, detail: str = "full",
-                  spatial_extent: str = None, temporal_extent: str = None, timestamp=None) -> dict:
+                  spatial_extent: str = None, temporal_extent: str = None, timestamp=None,updated=False) -> dict:
         user_id = "openeouser"
         try:
             name = self.arg_parser.parse_product(name)
@@ -268,8 +311,11 @@ class DataService:
                 start = None
                 end = None
 
+            if timestamp:
+                timestamp = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S.%f')
+
             orig_query = self.csw_session.get_query(
-                name, spatial_extent, start, end)
+                name, spatial_extent, start, end, timestamp=str(timestamp))
 
             return {
                 "status": "success",
@@ -279,3 +325,91 @@ class DataService:
         except ValidationError as exp:
             return ServiceException(400, user_id, str(exp), internal=False,
                                     links=["#tag/EO-Data-Discovery/paths/~1data~1{name}~1records/get"]).to_dict()
+
+    @rpc
+    def updaterecord(self, process_graph: dict={}):
+        user_id = "openeouser"
+        try:
+            if "updatetime" in process_graph:
+                self.csw_session.set_updatetime(process_graph["updatetime"])
+            if "deleted" in process_graph:
+                self.csw_session.set_deleted(process_graph["deleted"])
+
+            return {
+                "status": "success",
+                "code": 201,
+                "headers": {"Location": ""}
+            }
+        except Exception as exp:
+            return ServiceException(500, user_id, str(exp),
+                                    links=["#tag/Job-Management/paths/~1jobs/post"]).to_dict()
+
+
+    @rpc
+    def set_deleted(self, deleted: bool):
+        #logging.basicConfig(level=logging.DEBUG)
+
+        #logging.info(deleted)
+        #self.csw_session.set_deleted(deleted)
+        state = None
+
+        with open('mockup.json', 'r') as f:
+            state = json.load(f)
+        state["deleted"] = deleted
+        with open('mockup.json', 'w') as fp:
+            json.dump(state, fp)
+        #self.deleted = deleted
+        #logging.info(deleted)
+
+
+    @rpc
+    def set_updated(self, updated: str):
+        #logging.basicConfig(level=logging.DEBUG)
+
+        #logging.info(updated)
+        state = None
+        #self.csw_session.set_updatetime(updated)
+        #self.updatetime = updated
+        if updated:
+            updated = datetime.utcnow()
+            updated = updated.strftime('%Y-%m-%d %H:%M:%S.%f')
+        #logging.info(self.updatetime)
+        with open('mockup.json', 'r') as f:
+            state = json.load(f)
+        state["updatetime"] = updated
+        with open('mockup.json', 'w') as fp:
+            json.dump(state, fp)
+        #logging.info(updated)
+
+
+    @rpc
+    def updatestate(self):
+        """
+            Returns the current version of the back end.
+            :return: version_info: Dict of the current back end version.
+        """
+
+
+        state = None
+
+        with open('mockup.json', 'r') as f:
+            state = json.load(f)
+
+        return {
+            "status": "success",
+            "code": 200,
+            "data": state
+        }
+
+    def get_mockup_state(self):
+        """
+            Returns the current version of the back end.
+            :return: version_info: Dict of the current back end version.
+        """
+
+        state = None
+
+        with open('mockup.json', 'r') as f:
+            state = json.load(f)
+
+        return state

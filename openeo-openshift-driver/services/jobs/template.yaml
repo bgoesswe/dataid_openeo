@@ -33,7 +33,7 @@ parameters:
   required: true
 - name: GIT_URI
   displayName: Git URI
-  value: https://github.com/Open-EO/openeo-openshift-driver.git
+  value: https://github.com/bgoesswein/implementation_backend.git
   required: true
 - name: GIT_REF
   displayName: Git Reference

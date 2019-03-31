@@ -9,6 +9,8 @@ LOCAL_EODC_DRIVER_URL = "http://openeo.local.127.0.0.1.nip.io"
 logging.info("Connecting to the local back end {}...".format(LOCAL_EODC_DRIVER_URL))
 con = openeo.connect(LOCAL_EODC_DRIVER_URL)
 
+con.set_mockupstate()
+
 # Choose dataset
 processes = con.get_processes()
 pgA = processes.get_collection(name="s2a_prd_msil1c")
@@ -59,7 +61,6 @@ pgB = processes.ndvi(pgB, nir="B08", red="B04")
 pgB = processes.max_time(pgB)
 logging.info("Preparing Porcess graph for Job B using data PID from job A {}...".format(pidA))
 # Create job B out of the process graph B (pgB)
-logging.info("Preparing Porcess graph for Job B using data PID from job A {}...")
 jobB = con.create_job(pgB.graph)
 logging.info("Creating and starting job B with id {}".format(jobB.job_id))
 jobB.start_job()

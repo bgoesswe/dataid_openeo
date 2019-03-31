@@ -8,9 +8,10 @@ from xml.dom.minidom import parseString
 from nameko.extensions import DependencyProvider
 
 from ..models import ProductRecord, Record, FilePath, SpatialExtent, TemporalExtent
-from .xml_templates import xml_base, xml_and, xml_series, xml_product, xml_begin, xml_end, xml_bbox
+from .xml_templates import xml_base, xml_and, xml_series, xml_product, xml_begin, xml_end, xml_bbox, xml_timestamp
 from .bands import BandsExtractor
 
+import logging
 
 class CWSError(Exception):
     ''' CWSError raises if a error occures while querying the CSW server. '''
@@ -25,9 +26,25 @@ class CSWHandler:
     required output format.
     """
 
+
+
     def __init__(self, csw_server_uri: str):
         self.csw_server_uri = csw_server_uri
         self.bands_extractor = BandsExtractor()
+        self.updatetime = None
+        self.deleted = False
+
+    def set_updatetime(self, updatetime):
+        self.updatetime = updatetime
+
+    def set_deleted(self, deleted):
+        self.deleted = deleted
+
+    def get_updatetime(self):
+        return self.updatetime
+
+    def get_deleted(self):
+        return self.deleted
 
     def get_all_products(self) -> list:
         """Returns all products available at the back-end.
@@ -76,11 +93,24 @@ class CSWHandler:
                 crs="EPSG:4326"
             ),
             temporal_extent="{0}/{1}".format(data["dc:date"], 
-                                             datetime.now().strftime('%Y-%m-%d')),
+                                             datetime.utcnow().strftime('%Y-%m-%d')),
             bands=self.bands_extractor.get_bands(data_id)
         )
 
         return product_record
+
+    def get_mockup_state(self):
+        """
+            Returns the current version of the back end.
+            :return: version_info: Dict of the current back end version.
+        """
+        import json
+        state = None
+
+        with open('mockup.json', 'r') as f:
+            state = json.load(f)
+
+        return state
 
     def get_records_full(self, product: str, bbox: list, start: str, end: str) -> list:
         """Returns the full information of the records of the specified products
@@ -142,7 +172,8 @@ class CSWHandler:
 
         return response
 
-    def get_file_paths(self, product: str, bbox: list, start: str, end: str, timestamp: str) -> list:
+    def get_file_paths(self, product: str, bbox: list, start: str, end: str, timestamp: str,
+                             updated: str=None, deleted: bool=False) -> list:
         """Returns the file paths of the records of the specified products
         in the temporal and spatial extents.
 
@@ -152,17 +183,25 @@ class CSWHandler:
             start {str} -- The start date of the temporal extent
             end {str} -- The end date of the temporal extent
             timestamp {str} -- The timestamp of the data version, filters by data that was available at that time.
-
+            updated {bool} -- If true it simulates that one file got updated.
+            deleted {bool} -- If false it Simulates that one file got deleted.
         Returns:
             list -- The records data
         """
 
-        date_filter_timestamp = datetime.strptime(timestamp, "%Y-%m-%d")
-
+        state = self.get_mockup_state()
+        #logging.info("Mockupstate: {}".format(str(state)))
+        updated = state["updatetime"]
+        deleted = state["deleted"]
+        logging.info("Deleted: {}".format(str(deleted)))
+        logging.info("Updatetime: {}".format(str(updated)))
+        date_filter_timestamp = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S.%f')
+        logging.info("Query Timestamp: {}".format(str(timestamp)))
         records=self._get_records(product, bbox, start, end)
 
         # TODO: Better solution than this bulls** xml paths
         response=[]
+        first = True
         for item in records:
             path=item["gmd:distributionInfo"]["gmd:MD_Distribution"]["gmd:transferOptions"][
                 "gmd:MD_DigitalTransferOptions"]["gmd:onLine"][0]["gmd:CI_OnlineResource"]["gmd:linkage"]["gmd:URL"]
@@ -176,14 +215,39 @@ class CSWHandler:
             date_data_timestamp = datetime.strptime(data_timestamp, "%Y-%m-%d")
 
             if date_data_timestamp <= date_filter_timestamp:
-                response.append(
-                    FilePath(
-                        date=date,
-                        name=name,
-                        path=path,
-                        timestamp=data_timestamp
+                if not (first and deleted):
+                    response.append(
+                        FilePath(
+                            date=date,
+                            name=name,
+                            path=path,
+                            timestamp=data_timestamp
+                        )
                     )
-            )
+                else:
+                    logging.info("Ignored first file")
+            else:
+                logging.info("{} > {}".format(data_timestamp,timestamp))
+
+            if updated and first:
+                path = path + "_new"
+                name = name + "_new"
+
+                date_data_timestamp = datetime.strptime(updated, '%Y-%m-%d %H:%M:%S.%f')
+
+                if date_data_timestamp <= date_filter_timestamp:
+                    logging.info("FIRST: Appended additional file")
+                    response.append(
+                        FilePath(
+                            date=date,
+                            name=name,
+                            path=path,
+                            timestamp=data_timestamp
+                        ))
+                else:
+                    logging.info("FIRST: {} > {}".format(data_timestamp, timestamp))
+
+            first = False
 
         return response
 
@@ -308,7 +372,8 @@ class CSWHandler:
         return record_next, records
 
 
-    def get_query(self, product: str=None, bbox: list=None, start: str=None, end: str=None, series: bool=False) -> list:
+    def get_query(self, product: str=None, bbox: list=None, start: str=None, end: str=None,
+                        series: bool=False, timestamp: str=None) -> list:
         """Parses the XML request for the CSW server and collects the responsed by the
         batch triggered _get_single_records function.
 
@@ -325,11 +390,12 @@ class CSWHandler:
         Returns:
             list -- The records data
         """
-
+        series = False
         # Parse the XML request by injecting the query data into the XML templates
         output_schema="http://www.opengis.net/cat/csw/2.0.2" if series is True else "http://www.isotc211.org/2005/gmd"
 
         xml_filters=[]
+
 
         if series:
             xml_filters.append(xml_series)
@@ -351,8 +417,13 @@ class CSWHandler:
         if bbox and not series:
             xml_filters.append(xml_bbox.format(bbox=bbox))
 
+        if timestamp and not series:
+            xml_filters.append(xml_timestamp.format(timestamp=str(timestamp)))
+
         if len(xml_filters) == 0:
             return CWSError("Please provide fiters on the data (bounding box, start, end)")
+
+
 
         filter_parsed=""
         if len(xml_filters) == 1:

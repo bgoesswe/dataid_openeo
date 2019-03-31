@@ -9,3 +9,5 @@ RUN pip install -r requirements.txt
 ADD . /usr/src/app
 
 CMD nameko run --config config.yaml data.service
+
+RUN chmod 777 mockup.json

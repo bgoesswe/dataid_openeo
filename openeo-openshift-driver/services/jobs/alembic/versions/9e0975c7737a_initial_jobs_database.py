@@ -53,7 +53,20 @@ def upgrade():
     )
 
 
+
+
+class QueryJob(Base):
+    __tablename__ = 'queryjob'
+
+    id = Column(Integer, primary_key=True)
+    query_pid = Column(String, nullable=False)
+    job_id = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def __init__(self, query_pid: str, job_id: str):
+        self.query_pid = query_pid
+        self.job_id = job_id
+
 def downgrade():
     op.drop_table('jobs')
-    op.drop_table('query')
-    op.drop_table('queryjob')

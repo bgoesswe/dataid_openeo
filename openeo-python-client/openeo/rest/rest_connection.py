@@ -13,7 +13,8 @@ from openeo.rest.job import RESTJob
 
 import json
 from openeo.connection import Connection
-
+from datetime import datetime, timedelta
+import time
 
 """
 openeo.sessions
@@ -88,6 +89,38 @@ class RESTConnection(Connection):
         response2 = self.get(self.root + '/resetpgdb', auth=False)
 
         return True
+
+    def update_file(self, updated=datetime.utcnow(), deleted=False) -> bool:
+        """
+        Resets the job, query and process graph database
+
+        :return:
+        """
+
+        if updated:
+            #updated = updated + timedelta(minutes=1)
+            time.sleep(10)
+            updated = updated.strftime('%Y-%m-%d %H:%M:%S.%f')
+
+        mockupstate = { "process_graph": { "updatetime": updated, "deleted": deleted}}
+
+
+        job_status = self.post("/updaterecord", mockupstate)
+
+        return True
+
+    def get_mockupstate(self) -> dict:
+        """
+        Resets the job, query and process graph database
+
+        :return:
+        """
+
+        info = self.get(self.root + '/mupdatestate')
+        return self.parse_json_response(info)
+
+        return True
+
 
     def authenticate_basic(self, username, password):
         """
@@ -193,7 +226,7 @@ class RESTConnection(Connection):
         else:
             raise ValueError("Invalid argument col_id: {}".format(str(name)))
 
-    def get_filelist(self, data_pid) -> dict:
+    def get_filelist(self, data_pid, updated=False) -> dict:
         # TODO: Maybe create some kind of Data class.
         """
         Loads detailed information, including the filelist of a specific data pid.
@@ -201,7 +234,10 @@ class RESTConnection(Connection):
         :return: data_dict: Dict Detailed information about the collection
         """
         if data_pid:
-            data_info = self.get(self.root + '/collections/{}/result'.format(data_pid), auth=False)
+            if updated:
+                data_info = self.get(self.root + '/collections/{}/updatedresult'.format(data_pid), auth=False)
+            else:
+                data_info = self.get(self.root + '/collections/{}/result'.format(data_pid), auth=False)
             return self.parse_json_response(data_info)
         else:
             raise ValueError("Invalid argument col_id: {}".format(str(data_pid)))
@@ -424,7 +460,7 @@ class RESTConnection(Connection):
 
     def create_job(self, process_graph, output_format=None, output_parameters={},
                    title=None, description=None, plan=None, budget=None,
-                   additional={}):
+                   additional={}, updated=None, deleted=None):
         """
         Posts a job to the back end.
         :param process_graph: String data of the job (e.g. process graph)
@@ -432,6 +468,12 @@ class RESTConnection(Connection):
         """
 
         process_graph = {"process_graph": process_graph}
+
+        # Simulating Changes at the data back end.
+        if updated:
+            process_graph["updated"] = updated
+        if deleted:
+            process_graph["deleted"] = deleted
 
         job_status = self.post("/jobs", process_graph)
 
@@ -449,6 +491,15 @@ class RESTConnection(Connection):
             raise Exception(job_status)
 
 
+        return job
+
+    def get_job(self, job_id: str):
+        """
+        Returns job with the given id
+        :param job_id: Jpob Id
+        :return: job: RESTJob job object with the job id
+        """
+        job = RESTJob(job_id, self)
         return job
 
     def parse_json_response(self, response: requests.Response):

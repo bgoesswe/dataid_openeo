@@ -72,3 +72,9 @@ xml_bbox = (
     "<gml:upperCorner>{bbox.x2} {bbox.y2}</gml:upperCorner>"
     "</gml:Envelope>"
     "</ogc:BBOX>")
+
+xml_timestamp = (
+    "<ogc:PropertyIsLessThanOrEqualTo>"
+    "<ogc:PropertyName>apiso:Modified</ogc:PropertyName>"
+    "<ogc:Literal>{timestamp}</ogc:Literal>"
+    "</ogc:PropertyIsLessThanOrEqualTo>")

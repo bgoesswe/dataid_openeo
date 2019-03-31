@@ -189,6 +189,46 @@ class JobService:
             "headers": {"Location": "Jobs deleted"}
         }
 
+
+    @rpc
+    def updatebackend(self, user_id: str, process_graph: dict):
+        user_id = "openeouser"
+
+        logging.info(str(process_graph))
+
+        if "package" in process_graph:
+            if process_graph["package"]: # add dependency to req.txt file.
+                req_file = open("req.txt", "a")
+                req_file.write("{}\n".format(process_graph["package"]))
+                req_file.close()
+            else: # remove last line of req.txt file.
+                req_file = open("file")
+                lines = req_file.readlines()
+                req_file.close()
+                w = open("file", 'w')
+                w.writelines([item for item in lines[:-1]])
+                w.close()
+            logging.info("updatetime")
+
+        git_cmd = "git --git-dir=implementation_backend/.git "
+
+
+
+        CMD_GIT_BRANCH = "{0} commit -am \"test\"".format(git_cmd)
+
+        logging.info(CMD_GIT_BRANCH)
+        logging.info("Executing Git commit...")
+        # Executing the git commit
+        self.run_cmd(CMD_GIT_BRANCH)
+        logging.info("Executed Git commit !")
+
+        return {
+            "status": "success",
+            "code": 201,
+            "headers": {"Location": ""}
+        }
+
+
     @rpc
     def process(self, user_id: str, job_id: str):
             """ Execution of the job with the given job_id.
@@ -196,7 +236,7 @@ class JobService:
                 :param user_id: String user ID.
                 :param job_id: String Identifier of the job.
             """
-            # User mockup
+            # User mockup.json
             user_id = "openeouser"
 
             message = "started"
@@ -223,6 +263,9 @@ class JobService:
                 # Get file_paths
                 filter_args = process_nodes[0]["args"]
 
+                now = datetime.datetime.utcnow()
+                timestamp = now.strftime('%Y-%m-%d %H:%M:%S.%f')
+                logging.info("Now: {}".format(timestamp))
                 # If the data pid filter is used: Load filter data of the original query.
                 if filter_args["data_pid"]:
 
@@ -237,6 +280,7 @@ class JobService:
                     if filter_args["time"]:
                         filter_args_buf["time"] = filter_args["time"]
                     filter_args = filter_args_buf
+                    timestamp = query.created_at
 
                 # quick fix
                 if filter_args["extent"]:
@@ -245,16 +289,25 @@ class JobService:
 
                 temporal = "{}/{}".format(filter_args["time"]["extent"][0], filter_args["time"]["extent"][1])
 
-                now = datetime.datetime.now()
-                now = now.strftime("%Y-%m-%d")
+                # simulating updated records
+                updated = self.process_graphs_service.get_updated(user_id=user_id,
+                                                                  process_graph_id=job.process_graph_id)
 
+                message = str(updated)
+                deleted = self.process_graphs_service.get_deleted(user_id=user_id,
+                                                                  process_graph_id=job.process_graph_id)
+
+                message = str(deleted)
+                logging.info("Executed Timestamp: {}".format(timestamp))
                 response = self.data_service.get_records(
                     detail="file_path",
                     user_id=user_id,
                     name=filter_args["name"],
                     spatial_extent=spatial_extent,
                     temporal_extent=temporal,
-                    timestamp=now)
+                    timestamp=timestamp,
+                    updated=updated,
+                    deleted=deleted)
 
                 if response["status"] == "error":
                     raise Exception(response)
@@ -268,23 +321,23 @@ class JobService:
                     name=filter_args["name"],
                     spatial_extent=spatial_extent,
                     temporal_extent=temporal,
-                    timestamp=now)
+                    timestamp=timestamp)
 
-                start = datetime.datetime.now()
+                start = datetime.datetime.utcnow()
 
                 # Query Handler, creates a new query or returns an equal old one.
-                query = self.handle_query(response["data"], filter_args, orig_query)
+                query = self.handle_query(response["data"], filter_args, orig_query, now)
 
                 # Assignes the Query to the Job
                 self.assign_query(query.pid, job_id)
-                end = datetime.datetime.now()
+                end = datetime.datetime.utcnow()
                 delta = end - start
                 message = str(int(delta.total_seconds() * 1000))
 
-                start = datetime.datetime.now()
+                start = datetime.datetime.utcnow()
                 # Create Context model and assign it to the Job.
                 job.metrics = self.create_context_model(job_id)
-                end = datetime.datetime.now()
+                end = datetime.datetime.utcnow()
                 delta = end - start
 
                 # debugging output DELME
@@ -319,7 +372,7 @@ class JobService:
         context_model['openeo_api'] = "0.3.1"
         context_model['job_id'] = job_id
 
-        with open("requirements.txt") as f:
+        with open("req.txt") as f:
             content = f.readlines()
 
         code_env = [x.strip() for x in content]
@@ -355,7 +408,7 @@ class JobService:
         """
 
         try:
-            repo = Repo("openeo-openshift-driver/")
+            repo = Repo("implementation_backend/")
 
             timestamp = datetime.datetime.strptime(timestamp, '%Y%m%d%H%M%S.%f')
             timestamp = pytz.utc.localize(timestamp)
@@ -486,13 +539,14 @@ class JobService:
 
         return result_hash
 
-    def handle_query(self, result_files, filter_args, orig_query):
+    def handle_query(self, result_files, filter_args, orig_query, timestamp):
         """
             Query Handler, creating the Query entry into the QueryStore tables.
             Therefore, calculating the data entries for the RDA recommendations.
             :param result_files: String List of resulting files after executing the query.
             :param filter_args: Query/Filter arguments parsed by the EODC back end from the process graph.
             :param orig_query: Original Query that gets actually executed.
+            :param timestamp: Original Query execution timestamp.
             :return: query: Query created, or already existing Query that fits the input.
         """
 
@@ -521,10 +575,12 @@ class JobService:
         # extract additional information from the input data.
         dataset_pid = str(filter_args["name"])
         orig_query = str(orig_query)
-        metadata = str({"number_of_files": len(result_files.split("\n"))})
+        #logging.info("RESULTFILES {}".format(result_files))
+        metadata = str({"result_files": len(result_files.split("}, {"))})
 
         new_query = Query(dataset_pid, orig_query, normalized, norm_hash,
                  result_hash, metadata)
+        new_query.created_at = timestamp
 
         self.db.add(new_query)
         self.db.commit()
@@ -550,6 +606,16 @@ class JobService:
         queryjob = self.db.query(QueryJob).filter_by(job_id=job_id).first()
 
         return self.db.query(Query).filter_by(pid=queryjob.query_pid).first()
+
+    def get_job_by_query(self, query_pid):
+        """
+            Get query PID that was used by the job with the given job id.
+            :param job_id: String job ID
+            :return: query: Query that was used by the job with the job_id identifier.
+        """
+        queryjob = self.db.query(QueryJob).filter_by(query_pid=query_pid).first()
+
+        return self.db.query(Job).filter_by(id=queryjob.job_id).first()
 
     @rpc
     def get_query_by_pid(self, query_pid):
@@ -590,6 +656,20 @@ class JobService:
         return query
 
     @rpc
+    def get_origquerydata_by_pid(self, query_pid):
+        """
+            Returns original query of a given Query PID.
+            :param query_pid: String Query PID
+            :return: query: String of the original query.
+        """
+        query = self.db.query(Query).filter_by(pid=query_pid).first()
+
+        if query:
+            query = str(query.original)
+
+        return query
+
+    @rpc
     def get_querytimestamp_by_pid(self, query_pid):
         """
             Returns normalized query of a given Query PID.
@@ -605,7 +685,7 @@ class JobService:
         return timestamp
 
     @rpc
-    def reexecute_query(self, user_id, query_pid):
+    def reexecute_query(self, user_id, query_pid, deleted=False):
         """
         Re-executes the Query with the given query pid and returns the resulting files of the query execution.
         It also returns a state of the re-execution where it is stated if the resulting files differ the original
@@ -632,7 +712,19 @@ class JobService:
 
         temporal = "{}/{}".format(filter_args["time"]["extent"][0], filter_args["time"]["extent"][1])
 
-        timestamp = query.created_at.split(" ")[0]
+        timestamp = query.created_at#.split(" ")[0]
+
+        job = self.get_job_by_query(query_pid)
+
+        # simulating updated records
+        updated = self.process_graphs_service.get_updated(user_id=user_id,
+                                                          process_graph_id=job.process_graph_id)
+
+        deleted_cfg = self.process_graphs_service.get_deleted(user_id=user_id,
+                                                          process_graph_id=job.process_graph_id)
+
+        if deleted:
+            deleted_cfg = deleted
 
         # Re-execute the query
         response = self.data_service.get_records(
@@ -641,27 +733,15 @@ class JobService:
             name=filter_args["name"],
             spatial_extent=spatial_extent,
             temporal_extent=temporal,
-            timestamp=timestamp)
+            timestamp=timestamp,
+            updated=updated,
+            deleted=deleted_cfg)
 
         if response["status"] == "error":
             raise Exception(response)
 
 
         result_hash = self.create_result_hash(response["data"])
-
-        # # Clean up the resulting filelist
-        # result_list = str(response["data"]).split("]")[0]
-        # result_list += "]"
-        # result_list = result_list.replace(" ", "")
-        # result_list = result_list.replace("\t", "")
-        # result_list = result_list.replace("\n", "")
-        # # TESTCASE1
-        # # result_list = result_list.replace("S2A_MSIL1C_20170104T101402_N0204_R022_T32TPR_20170104T101405",
-        # #                                  "S2A_MSIL1C_20170104T101402_N0204_R022_T32TPR_20170104T101405_NEW")
-        # result_list = result_list.encode('utf-8')
-        # result_list = result_list.strip()
-        #
-        # result_hash = sha256(result_list).hexdigest()
 
         filter_args["file_paths"] = response["data"]
 
@@ -671,13 +751,39 @@ class JobService:
         }
         # Add state to the response
         if result_hash != query.result_hash:
-            output["state"] = "DIFF"
+
+            new_count = len(response["data"].split("}, {"))
+            old_count = int(json.loads(query.meta_data.replace("'", '"'))["result_files"])
+            logging.info("OLD_COUNT: {}, NEW_COUNT: {}".format(old_count, new_count))
+            if old_count != new_count:
+                response2 = self.data_service.get_records(
+                    detail="file_path",
+                    user_id=user_id,
+                    name=filter_args["name"],
+                    spatial_extent=spatial_extent,
+                    temporal_extent=temporal,
+                    timestamp=timestamp,
+                    updated=updated,
+                    deleted=deleted_cfg)
+
+                if response2["status"] == "error":
+                    raise Exception(response2)
+
+                file_diff = []
+
+                for file in response["data"].split("}, {"):
+                    found = False
+                    for file2 in response2["data"].split("}, {"):
+                        if file == file2:
+                            found = True
+                            break;
+                    if not found:
+                        file_diff.append(file)
+
+                output["state"] = str(file_diff)
         else:
             output["state"] = "EQUAL"
 
-        # TESTCASE1
-        #filter_args["file_paths"] = filter_args["file_paths"].replace("S2A_MSIL1C_20170104T101402_N0204_R022_T32TPR_20170104T101405",
-        #                                  "S2A_MSIL1C_20170104T101402_N0204_R022_T32TPR_20170104T101405_NEW")
         return output
 
     def run_cmd(self, command):
@@ -697,7 +803,7 @@ class JobService:
         """
 
         # Used git commands
-        git_cmd = "git --git-dir=openeo-openshift-driver/.git "
+        git_cmd = "git --git-dir=implementation_backend/.git "
 
         CMD_GIT_URL = "{0} config --get remote.origin.url".format(git_cmd)
         CMD_GIT_BRANCH = "{0} branch".format(git_cmd)
@@ -754,7 +860,7 @@ class JobService:
 
 
     def generate_area(self, lon1, lat1, lon2, lat2, date_start, date_end):
-        """Creates mockup area related to the given coordinates and daterange"""
+        """Creates mockup.json area related to the given coordinates and daterange"""
         FACTOR_RESOLUTION = 1000
 
         longitude = [lon1, lon1, lon2, lon2]
@@ -774,7 +880,7 @@ class JobService:
 
         daterange = end-start
 
-        # fill up area with mockup values
+        # fill up area with mockup.json values
         area = np.ones((width, height, daterange.days))
 
         return area
@@ -831,4 +937,4 @@ class JobService:
 
         #np.savetxt('{}.tif'.format(job_id), min_time_data, delimiter=',')
 
-        logging.info("FINISHED: {}".format(str(datetime.datetime.now())))
+        logging.info("FINISHED: {}".format(str(datetime.datetime.utcnow())))

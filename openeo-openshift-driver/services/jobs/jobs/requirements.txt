@@ -34,4 +34,3 @@ wrapt==1.10.11
 pytz==2018.7
 GitPython==2.1.11
 numpy==1.16.2
-GDAL==2.4.0
