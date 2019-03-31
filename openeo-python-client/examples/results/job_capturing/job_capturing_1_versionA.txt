@@ -1,0 +1,4 @@
+{'branch': 'master',
+ 'commit': '1a0cefd25c2a0fbb64a78cd9445c3c9314eaeb5b',
+ 'timestamp': '2019-03-31 18:12:36.221436',
+ 'url': 'https://github.com/bgoesswein/implementation_backend.git'}
