@@ -70,40 +70,51 @@ class JobService:
     @rpc
     def get(self, user_id: str, job_id: str):
         user_id = "openeouser"
-        try:
-            job = self.db.query(Job).filter_by(id=job_id).first()
+        #try:
+        job = self.db.query(Job).filter_by(id=job_id).first()
 
-            valid, response = self.authorize(user_id, job_id, job)
-            if not valid: 
-                return response
+        valid, response = self.authorize(user_id, job_id, job)
+        if not valid:
+            return response
 
-            response = self.process_graphs_service.get(user_id, job.process_graph_id)
-            if response["status"] == "error":
-               return response
-            
-            job.process_graph = response["data"]["process_graph"]
+        response = self.process_graphs_service.get(user_id, job.process_graph_id)
+        if response["status"] == "error":
+            return response
 
-            query = self.get_input_pid(job_id)
+        job.process_graph = response["data"]["process_graph"]
 
-            result = JobSchemaFull().dump(job).data
+        query = self.get_input_pid(job_id)
 
-            if query:
-                result["input_data"] = query.pid
+        result = JobSchemaFull().dump(job).data
 
-            version_timestamp = datetime.datetime.strptime(result["metrics"]["start_time"], '%Y-%m-%d %H:%M:%S.%f')
+        if query:
+            result["input_data"] = query.pid
 
-            version_timestamp = version_timestamp.strftime('%Y%m%d%H%M%S.%f')
-
-            result["metrics"]["back_end_timestamp"] = version_timestamp
-
+        if "metrics" in result:
+            if "start_time" in result["metrics"]:
+                version_timestamp = datetime.datetime.strptime(result["metrics"]["start_time"], '%Y-%m-%d %H:%M:%S.%f')
+                version_timestamp = version_timestamp.strftime('%Y%m%d%H%M%S.%f')
+                result["metrics"]["back_end_timestamp"] = version_timestamp
+            else:
+                return {
+                    "status": "success",
+                    "code": 202,
+                    "data": result
+                }
+        else:
             return {
                 "status": "success",
-                "code": 200,
+                "code": 202,
                 "data": result
             }
-        except Exception as exp:
-            return ServiceException(500, user_id, str(exp),
-                links=["#tag/Job-Management/paths/~1jobs~1{job_id}/get"]).to_dict()
+        return {
+            "status": "success",
+            "code": 200,
+            "data": result
+        }
+        #except Exception as exp:
+        #    return ServiceException(500, user_id, str(exp),
+        #        links=["#tag/Job-Management/paths/~1jobs~1{job_id}/get"]).to_dict()
 
     @rpc
     def modify(self, user_id: str, job_id: str, process_graph: dict, title: str=None, description: str=None, 
@@ -241,6 +252,7 @@ class JobService:
 
             message = "started"
             try:
+                start = datetime.datetime.utcnow()
                 job = self.db.query(Job).filter_by(id=job_id).first()
 
                 valid, response = self.authorize(user_id, job_id, job)
@@ -267,6 +279,7 @@ class JobService:
                 timestamp = now.strftime('%Y-%m-%d %H:%M:%S.%f')
                 logging.info("Now: {}".format(timestamp))
                 # If the data pid filter is used: Load filter data of the original query.
+                number_files = None
                 if filter_args["data_pid"]:
 
                     query = self.get_query_by_pid(filter_args["data_pid"].strip())
@@ -281,6 +294,7 @@ class JobService:
                         filter_args_buf["time"] = filter_args["time"]
                     filter_args = filter_args_buf
                     timestamp = query.created_at
+                    number_files = int(json.loads(query.meta_data.replace("'", '"'))["result_files"])
 
                 # quick fix
                 if filter_args["extent"]:
@@ -293,11 +307,14 @@ class JobService:
                 updated = self.process_graphs_service.get_updated(user_id=user_id,
                                                                   process_graph_id=job.process_graph_id)
 
-                message = str(updated)
+
                 deleted = self.process_graphs_service.get_deleted(user_id=user_id,
                                                                   process_graph_id=job.process_graph_id)
 
-                message = str(deleted)
+                end = datetime.datetime.utcnow()
+                delta = end - start
+                message = str(int(delta.total_seconds() * 1000))
+                start = datetime.datetime.utcnow()
                 logging.info("Executed Timestamp: {}".format(timestamp))
                 response = self.data_service.get_records(
                     detail="file_path",
@@ -312,6 +329,25 @@ class JobService:
                 if response["status"] == "error":
                     raise Exception(response)
 
+                # Load updated dataset if an old file was deleted
+                if number_files:
+                    new_number_files = len(response["data"].split("}, {"))
+                    if new_number_files != number_files:
+                        timestamp = now.strftime('%Y-%m-%d %H:%M:%S.%f')
+                        response = self.data_service.get_records(
+                            detail="file_path",
+                            user_id=user_id,
+                            name=filter_args["name"],
+                            spatial_extent=spatial_extent,
+                            temporal_extent=temporal,
+                            timestamp=timestamp,
+                            updated=updated,
+                            deleted=deleted)
+
+                        if response["status"] == "error":
+                            raise Exception(response)
+
+
                 # Processing Mockup
                 self.processing(filter_args, job_id)
 
@@ -323,6 +359,10 @@ class JobService:
                     temporal_extent=temporal,
                     timestamp=timestamp)
 
+                end = datetime.datetime.utcnow()
+                delta = end - start
+                message += ";" + str(int(delta.total_seconds() * 1000))
+
                 start = datetime.datetime.utcnow()
 
                 # Query Handler, creates a new query or returns an equal old one.
@@ -332,7 +372,7 @@ class JobService:
                 self.assign_query(query.pid, job_id)
                 end = datetime.datetime.utcnow()
                 delta = end - start
-                message = str(int(delta.total_seconds() * 1000))
+                message += ";" + str(int(delta.total_seconds() * 1000))
 
                 start = datetime.datetime.utcnow()
                 # Create Context model and assign it to the Job.
@@ -341,9 +381,9 @@ class JobService:
                 delta = end - start
 
                 # debugging output DELME
-                message += "## CM: " + str(int(delta.total_seconds() * 1000))
+                message += ";" + str(int(delta.total_seconds() * 1000))
 
-                job.status = "finished " + str(message)
+                job.status = str(message)
                 self.db.commit()
                 return
             except Exception as exp:
@@ -364,8 +404,20 @@ class JobService:
 
         context_model = {}
         # MOCK UPs of the Processing
-        process_graph = self.process_graphs_service.get(user_id, job.process_graph_id)
-        output_hash = sha256(("OUTPUT"+str(process_graph)).encode('utf-8')).hexdigest()
+        # process_graph = self.process_graphs_service.get(user_id, job.process_graph_id)
+        start = datetime.datetime.utcnow()
+
+        hashfkt = sha256()
+        with open("/usr/src/app/results/{}_result.tiff".format(job_id), 'rb') as afile:
+            buf = afile.read()
+            hashfkt.update(buf)
+
+        output_hash = hashfkt.hexdigest()
+
+        end = datetime.datetime.utcnow()
+
+        delta = end - start
+        logging.info("HASH: {}".format(str(int(delta.total_seconds() * 1000))))
 
         context_model['output_data'] = output_hash
         context_model['input_data'] = query.pid
@@ -381,9 +433,8 @@ class JobService:
 
         context_model['interpreter'] = "Python 3.7.1"
         context_model['start_time'] = str(job.created_at)
-        context_model['end_time'] = str(job.created_at+datetime.timedelta(1, 30))#datetime.datetime.fromtimestamp(time.time())
-
-        # cm = get_job_cm(job_id)
+        # Mock Up
+        context_model['end_time'] = str(datetime.datetime.fromtimestamp(time.time()))
 
         return context_model
 
@@ -590,6 +641,7 @@ class JobService:
     def assign_query(self, query_pid, job_id):
         """
             Assign Query to a job, by adding it to the QueryJob table.
+            Assign Query to a job, by adding it to the QueryJob table.
             :param query_pid: String Query PID
             :param job_id: String Job ID
         """
@@ -605,7 +657,10 @@ class JobService:
         """
         queryjob = self.db.query(QueryJob).filter_by(job_id=job_id).first()
 
-        return self.db.query(Query).filter_by(pid=queryjob.query_pid).first()
+        if queryjob:
+            return self.db.query(Query).filter_by(pid=queryjob.query_pid).first()
+        else:
+            return None
 
     def get_job_by_query(self, query_pid):
         """
@@ -684,6 +739,46 @@ class JobService:
 
         return timestamp
 
+    def update_filellist(self, user_id, dataset, spatial_extent, temporal, orig_response):
+
+            now = datetime.datetime.utcnow()
+            timestamp = now.strftime('%Y-%m-%d %H:%M:%S.%f')
+            response2 = self.data_service.get_records(
+                detail="file_path",
+                user_id=user_id,
+                name=dataset,
+                spatial_extent=spatial_extent,
+                temporal_extent=temporal,
+                timestamp=timestamp)
+
+            if response2["status"] == "error":
+                raise Exception(response2)
+
+            file_diff = []
+
+            logging.info(orig_response["data"])
+
+            json_response = orig_response["data"].replace("\"", "").replace("'", "\"")
+            json_response2 = response2["data"].replace("\"", "").replace("'", "\"")
+
+            json_response = json_response.split("]")[0] + "]"
+            json_response2 = json_response2.split("]")[0] + "]"
+
+            logging.info(json_response)
+
+            json_response = json.loads(json_response)
+            json_response2 = json.loads(json_response2)
+
+            for file in json_response2:
+                found = False
+                for file2 in json_response:
+                    if file["name"] == file2["name"]:
+                        found = True
+                        break
+                if not found:
+                    file_diff.append(file)
+            return file_diff
+
     @rpc
     def reexecute_query(self, user_id, query_pid, deleted=False):
         """
@@ -756,31 +851,8 @@ class JobService:
             old_count = int(json.loads(query.meta_data.replace("'", '"'))["result_files"])
             logging.info("OLD_COUNT: {}, NEW_COUNT: {}".format(old_count, new_count))
             if old_count != new_count:
-                response2 = self.data_service.get_records(
-                    detail="file_path",
-                    user_id=user_id,
-                    name=filter_args["name"],
-                    spatial_extent=spatial_extent,
-                    temporal_extent=temporal,
-                    timestamp=timestamp,
-                    updated=updated,
-                    deleted=deleted_cfg)
-
-                if response2["status"] == "error":
-                    raise Exception(response2)
-
-                file_diff = []
-
-                for file in response["data"].split("}, {"):
-                    found = False
-                    for file2 in response2["data"].split("}, {"):
-                        if file == file2:
-                            found = True
-                            break;
-                    if not found:
-                        file_diff.append(file)
-
-                output["state"] = str(file_diff)
+                state = self.update_filellist(user_id, filter_args["name"], spatial_extent, temporal, response)
+                output['state'] = str(state)
         else:
             output["state"] = "EQUAL"
 
@@ -910,8 +982,9 @@ class JobService:
     def processing(self, filter_args, job_id):
         '''Returns max time dataset'''
 
-        logging.basicConfig(filename='{}.log'.format(job_id), level=logging.DEBUG)
-
+        from PIL import Image
+       # logging.basicConfig(filename='{}.log'.format(job_id), level=logging.DEBUG)
+        logging.info("START: {}".format(str(datetime.datetime.utcnow())))
         logging.info("before spatial")
         west = filter_args["extent"]["extent"]["west"]
         south = filter_args["extent"]["extent"]["south"]
@@ -935,6 +1008,12 @@ class JobService:
         logging.info("API-VERSION: 0.3.1")
         logging.info("INTERPRETER: Python 3.7.1")
 
+        im = Image.fromarray(min_time_data, mode='F')
+        logging.info("Creating image {}".format(im))
+        im.save("/usr/src/app/results/{}_result.tiff".format(job_id), "TIFF")
+        logging.info("saved the results/{}_result.tiff file".format(job_id))
         #np.savetxt('{}.tif'.format(job_id), min_time_data, delimiter=',')
+
+        start = datetime.datetime.utcnow()
 
         logging.info("FINISHED: {}".format(str(datetime.datetime.utcnow())))

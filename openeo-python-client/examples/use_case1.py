@@ -9,7 +9,7 @@ LOCAL_EODC_DRIVER_URL = "http://openeo.local.127.0.0.1.nip.io"
 logging.info("Connecting to the local back end {}...".format(LOCAL_EODC_DRIVER_URL))
 con = openeo.connect(LOCAL_EODC_DRIVER_URL)
 
-con.set_mockupstate()
+con.update_file(None, False)
 
 # Choose dataset
 processes = con.get_processes()

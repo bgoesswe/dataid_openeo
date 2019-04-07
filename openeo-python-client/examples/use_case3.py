@@ -1,6 +1,6 @@
 import openeo
 import logging
-
+import time
 logging.basicConfig(level=logging.INFO)
 
 ''' 1. Researcher A runs an experiment (job A) at the EODC back end  '''
@@ -9,6 +9,7 @@ LOCAL_EODC_DRIVER_URL = "http://openeo.local.127.0.0.1.nip.io"
 logging.info("Connecting to the local back end {}...".format(LOCAL_EODC_DRIVER_URL))
 con = openeo.connect(LOCAL_EODC_DRIVER_URL)
 
+con.update_file(None, False)
 # Choose dataset
 processes = con.get_processes()
 pgA = processes.get_collection(name="s2a_prd_msil1c")
@@ -68,12 +69,14 @@ logging.info("Creating Job C and retrieving Job C ID...")
 jobC = con.create_job(pgC.graph) # differs from job A
 logging.info("Job C with ID {} created...".format(jobC.job_id))
 logging.info("Starting Job C...")
+time.sleep(2)
 jobC.start_job()
 
 # Wait until the job execution was finished
 logging.info("Job C Processing...")
 desc = jobC.describe_job
 while desc["status"] == "submitted":
+    time.sleep(2)
     desc = jobC.describe_job
 
 ''' 4. Researcher wants to compare the jobs by their environment and outcome. '''
