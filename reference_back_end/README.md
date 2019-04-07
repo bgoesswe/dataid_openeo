@@ -1,4 +1,4 @@
-# openEO: OpenShift Driver
+# openEO: OpenShift Driver (Reference back end used for the impact Evaluation)
 
 ## Information
 - version: 0.3
