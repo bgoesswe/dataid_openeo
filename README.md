@@ -4,7 +4,7 @@ It consists of the following parts:
 
 * An extended version of the OpenEO EODC back end driver (https://github.com/Open-EO/openeo-openshift-driver) in the openeo-openshift-driver folder
 
-*The reference back end of the OpenEO EODC back end driver (https://github.com/bgoesswein/dataid_openeo/tree/master/reference_back_end) in the reference_back_end folder
+* The reference back end of the OpenEO EODC back end driver (https://github.com/bgoesswein/dataid_openeo/tree/master/reference_back_end) in the reference_back_end folder
 
 * An extended version of the OpenEO Python client (https://github.com/Open-EO/openeo-python-client)in the openeo-python-client folder
 
